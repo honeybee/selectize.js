@@ -1,6 +1,7 @@
 /**
- * selectize.js (v0.12.6)
+ * selectize.js (v0.13.5)
  * Copyright (c) 2013–2015 Brian Reavis & contributors
+ * Copyright (c) 2020 Selectize Team & contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this
  * file except in compliance with the License. You may obtain a copy of the License at:
@@ -12,6 +13,7 @@
  * governing permissions and limitations under the License.
  *
  * @author Brian Reavis <brian@thirdroute.com>
+ * @author Ris Adams <selectize@risadams.com>  
  */
 
 /*jshint curly:false */
@@ -20,7 +22,7 @@
 (function(root, factory) {
 	if (typeof define === 'function' && define.amd) {
 		define(['jquery','sifter','microplugin'], factory);
-	} else if (typeof exports === 'object') {
+	} else if (typeof module === 'object' && typeof module.exports === 'object') {
 		module.exports = factory(require('jquery'), require('sifter'), require('microplugin'));
 	} else {
 		root.Selectize = factory(root.jQuery, root.Sifter, root.MicroPlugin);
@@ -51,7 +53,7 @@
 				}
 			} 
 			// Recurse element node, looking for child text nodes to highlight, unless element 
-			// is childless, <script>, <style>, or already highlighted: <span class="hightlight">
+			// is childless, <script>, <style>, or already highlighted: <span class="highlight">
 			else if (node.nodeType === 1 && node.childNodes && !/(script|style)/i.test(node.tagName) && ( node.className !== 'highlight' || node.tagName !== 'SPAN' )) {
 				for (var i = 0; i < node.childNodes.length; ++i) {
 					i += highlight(node.childNodes[i]);
@@ -329,6 +331,10 @@
 	 */
 	var getSelection = function(input) {
 		var result = {};
+	  if(input === undefined) {
+	    console.warn('WARN getSelection cannot locate input control');
+	    return result;
+	  }
 		if ('selectionStart' in input) {
 			result.start = input.selectionStart;
 			result.length = input.selectionEnd - result.start;
@@ -378,12 +384,17 @@
 		if (!Selectize.$testInput) {
 			Selectize.$testInput = $('<span />').css({
 				position: 'absolute',
-				top: -99999,
-				left: -99999,
 				width: 'auto',
 				padding: 0,
 				whiteSpace: 'pre'
-			}).appendTo('body');
+			});
+	
+			$('<div />').css({
+				position: 'absolute',
+				width: 0,
+				height: 0,
+				overflow: 'hidden'
+			}).append(Selectize.$testInput).appendTo('body');
 		}
 	
 		Selectize.$testInput.text(str);
@@ -412,7 +423,8 @@
 		var currentWidth = null;
 	
 		var update = function(e, options) {
-			var value, keyCode, printable, placeholder, width;
+			var value, keyCode, printable, width;
+			var placeholder, placeholderWidth;
 			var shift, character, selection;
 			e = e || window.event || {};
 			options = options || {};
@@ -450,11 +462,13 @@
 			}
 	
 			placeholder = $input.attr('placeholder');
-			if (!value && placeholder) {
-				value = placeholder;
+			if (placeholder) {
+				placeholderWidth = measureString(placeholder, $input) + 4;
+			} else {
+				placeholderWidth = 0;
 			}
 	
-			width = measureString(value, $input) + 4;
+			width = Math.max(measureString(value, $input), placeholderWidth) + 4;
 			if (width !== currentWidth) {
 				currentWidth = width;
 				$input.width(width);
@@ -528,6 +542,7 @@
 			hasOptions       : false,
 			currentResults   : null,
 			lastValue        : '',
+			lastValidValue   : '',
 			caretPos         : 0,
 			loading          : 0,
 			loadedSearches   : {},
@@ -625,10 +640,10 @@
 	
 			$wrapper          = $('<div>').addClass(settings.wrapperClass).addClass(classes).addClass(inputMode);
 			$control          = $('<div>').addClass(settings.inputClass).addClass('items').appendTo($wrapper);
-			$control_input    = $('<input type="text" autocomplete="off" />').appendTo($control).attr('tabindex', $input.is(':disabled') ? '-1' : self.tabIndex);
+			$control_input    = $('<input type="text" autocomplete="new-password" autofill="no" />').appendTo($control).attr('tabindex', $input.is(':disabled') ? '-1' : self.tabIndex);
 			$dropdown_parent  = $(settings.dropdownParent || $wrapper);
 			$dropdown         = $('<div>').addClass(settings.dropdownClass).addClass(inputMode).hide().appendTo($dropdown_parent);
-			$dropdown_content = $('<div>').addClass(settings.dropdownContentClass).appendTo($dropdown);
+			$dropdown_content = $('<div>').addClass(settings.dropdownContentClass).attr('tabindex', '-1').appendTo($dropdown);
 	
 			if(inputId = $input.attr('id')) {
 				$control_input.attr('id', inputId + '-selectized');
@@ -670,7 +685,9 @@
 			if ($input.attr('autocapitalize')) {
 				$control_input.attr('autocapitalize', $input.attr('autocapitalize'));
 			}
-			$control_input[0].type = $input[0].type;
+			if ($input.is('input')) {
+				$control_input[0].type = $input[0].type;
+			}
 	
 			self.$wrapper          = $wrapper;
 			self.$control          = $control;
@@ -692,8 +709,8 @@
 			$control_input.on({
 				mousedown : function(e) { e.stopPropagation(); },
 				keydown   : function() { return self.onKeyDown.apply(self, arguments); },
-				keyup     : function() { return self.onKeyUp.apply(self, arguments); },
 				keypress  : function() { return self.onKeyPress.apply(self, arguments); },
+				input     : function() { return self.onInput.apply(self, arguments); },
 				resize    : function() { self.positionDropdown.apply(self, []); },
 				blur      : function() { return self.onBlur.apply(self, arguments); },
 				focus     : function() { self.ignoreBlur = false; return self.onFocus.apply(self, arguments); },
@@ -743,7 +760,8 @@
 	
 			$input.attr('tabindex', -1).hide().after(self.$wrapper);
 	
-			if ($.isArray(settings.items)) {
+			if (Array.isArray(settings.items)) {
+				self.lastValidValue = settings.items;
 				self.setValue(settings.items);
 				delete settings.items;
 			}
@@ -786,6 +804,7 @@
 		setupTemplates: function() {
 			var self = this;
 			var field_label = self.settings.labelField;
+			var field_value = self.settings.valueField;
 			var field_optgroup = self.settings.optgroupLabelField;
 	
 			var templates = {
@@ -796,7 +815,7 @@
 					return '<div class="optgroup-header">' + escape(data[field_optgroup]) + '</div>';
 				},
 				'option': function(data, escape) {
-					return '<div class="option">' + escape(data[field_label]) + '</div>';
+					return '<div class="option '+( data[field_value] === '' ? 'selectize-dropdown-emptyoptionlabel' : '')+'">' + escape(data[field_label]) + '</div>';
 				},
 				'item': function(data, escape) {
 					return '<div class="item">' + escape(data[field_label]) + '</div>';
@@ -831,7 +850,9 @@
 				'type'            : 'onType',
 				'load'            : 'onLoad',
 				'focus'           : 'onFocus',
-				'blur'            : 'onBlur'
+				'blur'            : 'onBlur',
+				'dropdown_item_activate'        : 'onDropdownItemActivate',
+				'dropdown_item_deactivate'      : 'onDropdownItemDeactivate'
 			};
 	
 			for (key in callbacks) {
@@ -903,6 +924,11 @@
 		 * input / select element.
 		 */
 		onChange: function() {
+			var self = this;
+			if (self.getValue() !== "") {
+				self.lastValidValue = self.getValue();
+			}
+			this.$input.trigger('input');
 			this.$input.trigger('change');
 		},
 	
@@ -929,7 +955,9 @@
 					var pastedText = self.$control_input.val();
 					if(!pastedText.match(self.settings.splitOn)){ return }
 	
-					var splitInput = $.trim(pastedText).split(self.settings.splitOn);
+					var splitInput = pastedText
+						.trim()
+						.split(self.settings.splitOn);
 					for (var i = 0, n = splitInput.length; i < n; i++) {
 						self.createItem(splitInput[i]);
 					}
@@ -1028,7 +1056,7 @@
 							e.preventDefault();
 						}
 					}
-					if (self.settings.create && self.createItem()) {
+					if (self.settings.create && self.createItem() && self.settings.showAddOptionOnCreate) {
 						e.preventDefault();
 					}
 					return;
@@ -1045,15 +1073,14 @@
 		},
 	
 		/**
-		 * Triggered on <input> keyup.
+		 * Triggered on <input> input.
 		 *
 		 * @param {object} e
 		 * @returns {boolean}
 		 */
-		onKeyUp: function(e) {
+		onInput: function(e) {
 			var self = this;
 	
-			if (self.isLocked) return e && e.preventDefault();
 			var value = self.$control_input.val() || '';
 			if (self.lastValue !== value) {
 				self.lastValue = value;
@@ -1250,6 +1277,16 @@
 		},
 	
 		/**
+		 * Gets the value of input field of the control.
+		 *
+		 * @returns {string} value
+		 */
+		getTextboxValue: function() {
+			var $input = this.$control_input;
+			return $input.val();
+		},
+	
+		/**
 		 * Sets the input field of the control to the specified value.
 		 *
 		 * @param {string} value
@@ -1291,6 +1328,18 @@
 				this.clear(silent);
 				this.addItems(value, silent);
 			});
+		},
+	
+		/**
+		 * Resets the number of max items to the given value
+		 *
+		 * @param {number} value
+		 */
+		setMaxItems: function(value){
+			if(value === 0) value = null; //reset to unlimited items.
+			this.settings.maxItems = value;
+			this.settings.mode = this.settings.mode || (this.settings.maxItems === 1 ? 'single' : 'multi');
+			this.refreshState();
 		},
 	
 		/**
@@ -1371,13 +1420,17 @@
 			var scroll_top, scroll_bottom;
 			var self = this;
 	
-			if (self.$activeOption) self.$activeOption.removeClass('active');
+			if (self.$activeOption) {
+				self.$activeOption.removeClass('active');
+				self.trigger('dropdown_item_deactivate', self.$activeOption.attr('data-value'));
+			}
 			self.$activeOption = null;
 	
 			$option = $($option);
 			if (!$option.length) return;
 	
 			self.$activeOption = $option.addClass('active');
+			if (self.isOpen) self.trigger('dropdown_item_activate', self.$activeOption.attr('data-value'));
 	
 			if (scroll || !isset(scroll)) {
 	
@@ -1437,7 +1490,7 @@
 		 */
 		focus: function() {
 			var self = this;
-			if (self.isDisabled) return;
+			if (self.isDisabled) return self;
 	
 			self.ignoreFocus = true;
 			self.$control_input[0].focus();
@@ -1445,6 +1498,7 @@
 				self.ignoreFocus = false;
 				self.onFocus();
 			}, 0);
+			return self;
 		},
 	
 		/**
@@ -1455,6 +1509,7 @@
 		blur: function(dest) {
 			this.$control_input[0].blur();
 			this.onBlur(null, dest);
+			return this;
 		},
 	
 		/**
@@ -1556,7 +1611,7 @@
 			}
 	
 			var self              = this;
-			var query             = $.trim(self.$control_input.val());
+			var query             = (self.$control_input.val()).trim();
 			var results           = self.search(query);
 			var $dropdown_content = self.$dropdown_content;
 			var active_before     = self.$activeOption && hash_key(self.$activeOption.attr('data-value'));
@@ -1575,7 +1630,7 @@
 				option      = self.options[results.items[i].id];
 				option_html = self.render('option', option);
 				optgroup    = option[self.settings.optgroupField] || '';
-				optgroups   = $.isArray(optgroup) ? optgroup : [optgroup];
+				optgroups   = Array.isArray(optgroup) ? optgroup : [optgroup];
 	
 				for (j = 0, k = optgroups && optgroups.length; j < k; j++) {
 					optgroup = optgroups[j];
@@ -1593,8 +1648,8 @@
 			// sort optgroups
 			if (this.settings.lockOptgroupOrder) {
 				groups_order.sort(function(a, b) {
-					var a_order = self.optgroups[a].$order || 0;
-					var b_order = self.optgroups[b].$order || 0;
+					var a_order = self.optgroups[a] && self.optgroups[a].$order || 0;
+					var b_order = self.optgroups[b] && self.optgroups[b].$order || 0;
 					return a_order - b_order;
 				});
 			}
@@ -1633,6 +1688,9 @@
 	
 			// add "selected" class to selected options
 			if (!self.settings.hideSelected) {
+				// clear selection on all previously selected elements first
+				self.$dropdown.find('.selected').removeClass('selected');
+	
 				for (i = 0, n = self.items.length; i < n; i++) {
 					self.getOption(self.items[i]).addClass('selected');
 				}
@@ -1641,16 +1699,18 @@
 			// add create option
 			has_create_option = self.canCreate(query);
 			if (has_create_option) {
-				$dropdown_content.prepend(self.render('option_create', {input: query}));
-				$create = $($dropdown_content[0].childNodes[0]);
+				if(self.settings.showAddOptionOnCreate) {
+					$dropdown_content.prepend(self.render('option_create', {input: query}));
+					$create = $($dropdown_content[0].childNodes[0]);
+				}
 			}
 	
 			// activate
-			self.hasOptions = results.items.length > 0 || has_create_option;
+			self.hasOptions = results.items.length > 0 || ( has_create_option && self.settings.showAddOptionOnCreate );
 			if (self.hasOptions) {
 				if (results.items.length > 0) {
 					$active_before = active_before && self.getOption(active_before);
-					if ($active_before && $active_before.length) {
+					if (results.query !== "" && $active_before && $active_before.length) {
 						$active = $active_before;
 					} else if (self.settings.mode === 'single' && self.items.length) {
 						$active = self.getOption(self.items[0]);
@@ -1688,7 +1748,7 @@
 		addOption: function(data) {
 			var i, n, value, self = this;
 	
-			if ($.isArray(data)) {
+			if (Array.isArray(data)) {
 				for (i = 0, n = data.length; i < n; i++) {
 					self.addOption(data[i]);
 				}
@@ -1855,8 +1915,10 @@
 	
 		/**
 		 * Clears all options.
+		 *
+		 * @param {boolean} silent
 		 */
-		clearOptions: function() {
+		clearOptions: function(silent) {
 			var self = this;
 	
 			self.loadedSearches = {};
@@ -1871,6 +1933,7 @@
 			self.options = self.sifter.items = options;
 			self.lastQuery = null;
 			self.trigger('option_clear');
+			self.clear(silent);
 		},
 	
 		/**
@@ -1882,6 +1945,17 @@
 		 */
 		getOption: function(value) {
 			return this.getElementWithValue(value, this.$dropdown_content.find('[data-selectable]'));
+		},
+	
+		/**
+		 * Returns the jQuery element of the first
+		 * selectable option.
+		 *
+		 * @return {object}
+		 */
+		getFirstOption: function() {
+			var $options = this.$dropdown.find('[data-selectable]');
+			return $options.length > 0 ? $options.eq(0) : $();
 		},
 	
 		/**
@@ -1922,6 +1996,34 @@
 		},
 	
 		/**
+		 * Finds the first element with a "textContent" property
+		 * that matches the given textContent value.
+		 *
+		 * @param {mixed} textContent
+		 * @param {boolean} ignoreCase
+		 * @param {object} $els
+		 * @return {object}
+		 */
+		getElementWithTextContent: function(textContent, ignoreCase ,$els) {
+			textContent = hash_key(textContent);
+	
+			if (typeof textContent !== 'undefined' && textContent !== null) {
+				for (var i = 0, n = $els.length; i < n; i++) {
+					var eleTextContent = $els[i].textContent
+					if (ignoreCase == true) {
+						eleTextContent = (eleTextContent !== null) ? eleTextContent.toLowerCase() : null;
+						textContent = textContent.toLowerCase();
+					}
+					if (eleTextContent === textContent) {
+						return $($els[i]);
+					}
+				}
+			}
+	
+			return $();
+		},
+	
+		/**
 		 * Returns the jQuery element of the item
 		 * matching the given value.
 		 *
@@ -1930,6 +2032,19 @@
 		 */
 		getItem: function(value) {
 			return this.getElementWithValue(value, this.$control.children());
+		},
+	
+		/**
+		 * Returns the jQuery element of the item
+		 * matching the given textContent.
+		 *
+		 * @param {string} value
+		 * @param {boolean} ignoreCase
+		 * @returns {object}
+		 */
+		getFirstItemMatchedByTextContent: function(textContent, ignoreCase) {
+			ignoreCase = (ignoreCase !== null && ignoreCase === true) ? true : false;
+			return this.getElementWithTextContent(textContent, ignoreCase, this.$dropdown_content.find('[data-selectable]'));
 		},
 	
 		/**
@@ -1947,7 +2062,7 @@
 				this.buffer.appendChild(childNodes[i]);
 			}
 	
-			var items = $.isArray(values) ? values : [values];
+			var items = Array.isArray(values) ? values : [values];
 			for (var i = 0, n = items.length; i < n; i++) {
 				this.isPending = (i < n - 1);
 				this.addItem(items[i], silent);
@@ -2038,6 +2153,7 @@
 			i = self.items.indexOf(value);
 	
 			if (i !== -1) {
+				self.trigger('item_before_remove', value, $item);
 				$item.remove();
 				if ($item.hasClass('active')) {
 					idx = self.$activeItems.indexOf($item[0]);
@@ -2078,7 +2194,7 @@
 		createItem: function(input, triggerDropdown) {
 			var self  = this;
 			var caret = self.caretPos;
-			input = input || $.trim(self.$control_input.val() || '');
+			input = input || (self.$control_input.val() || '').trim();
 	
 			var callback = arguments[arguments.length - 1];
 			if (typeof callback !== 'function') callback = function() {};
@@ -2097,7 +2213,14 @@
 			var setup = (typeof self.settings.create === 'function') ? this.settings.create : function(input) {
 				var data = {};
 				data[self.settings.labelField] = input;
-				data[self.settings.valueField] = input;
+				var key = input;
+				if ( self.settings.formatValueToKey && typeof self.settings.formatValueToKey === 'function' ) {
+					key = self.settings.formatValueToKey.apply(this, [key]);
+					if (key === null || typeof key === 'undefined' || typeof key === 'object' || typeof key === 'function') {
+						throw new Error('Selectize "formatValueToKey" setting must be a function that returns a value other than object or function.');
+					}
+				}
+				data[self.settings.valueField] = key;
 				return data;
 			};
 	
@@ -2277,7 +2400,7 @@
 				// Do not trigger blur while inside a blur event,
 				// this fixes some weird tabbing behavior in FF and IE.
 				// See #1164
-				if (!self.isBlurring) {
+				if (self.isBlurring) {
 					self.$control_input.blur(); // close keyboard on iOS
 				}
 			}
@@ -2362,7 +2485,11 @@
 			selection = getSelection(self.$control_input[0]);
 	
 			if (self.$activeOption && !self.settings.hideSelected) {
-				option_select = self.getAdjacentOption(self.$activeOption, -1).attr('data-value');
+				if (typeof self.settings.deselectBehavior === 'string' && self.settings.deselectBehavior === 'top') {
+					option_select = self.getFirstOption().attr('data-value');
+				} else {
+					option_select = self.getAdjacentOption(self.$activeOption, -1).attr('data-value');
+				}
 			}
 	
 			// determine items that will be removed
@@ -2697,6 +2824,7 @@
 		persist: true,
 		diacritics: true,
 		create: false,
+		showAddOptionOnCreate: true,
 		createOnBlur: false,
 		createFilter: null,
 		highlight: true,
@@ -2705,12 +2833,15 @@
 		maxItems: null,
 		hideSelected: null,
 		addPrecedence: false,
-		selectOnTab: false,
+		selectOnTab: true,
 		preload: false,
 		allowEmptyOption: false,
+		showEmptyOptionInDropdown: false,
+		emptyOptionLabel: '--',
 		closeAfterSelect: false,
 	
 		scrollDuration: 60,
+		deselectBehavior: 'previous', //top, previous
 		loadThrottle: 300,
 		loadingClass: 'loading',
 	
@@ -2740,6 +2871,7 @@
 		/*
 		load                 : null, // function(query, callback) { ... }
 		score                : null, // function(search) { ... }
+		formatValueToKey     : null, // function(key) { ... }
 		onInitialize         : null, // function() { ... }
 		onChange             : null, // function(value) { ... }
 		onItemAdd            : null, // function(value, $item) { ... }
@@ -2910,6 +3042,10 @@
 			if (!placeholder && !settings.allowEmptyOption) {
 				placeholder = $input.children('option[value=""]').text();
 			}
+			if (settings.allowEmptyOption && settings.showEmptyOptionInDropdown && !$input.children('option[value=""]').length) {
+				var input_html = $input.html();
+				$input.html('<option value="">'+settings.emptyOptionLabel+'</option>'+input_html);
+			}
 	
 			var settings_element = {
 				'placeholder' : placeholder,
@@ -2932,6 +3068,75 @@
 	$.fn.selectize.support = {
 		validity: SUPPORTS_VALIDITY_API
 	};
+	
+	
+	Selectize.define("auto_position", function () {
+	  var self = this;
+	
+	  const POSITION = {
+	    top: 'top',
+	    bottom: 'bottom',
+	  };
+	
+	  self.positionDropdown = (function() {
+	    return function() {
+	      const $control = this.$control;
+	      const offset = this.settings.dropdownParent === 'body' ? $control.offset() : $control.position();
+	      offset.top += $control.outerHeight(true);
+	
+	      const dropdownHeight = this.$dropdown.prop('scrollHeight') + 5; // 5 - padding value;
+	      const controlPosTop = this.$control.get(0).getBoundingClientRect().top;
+	      const wrapperHeight = this.$wrapper.height();
+	      const position = controlPosTop + dropdownHeight + wrapperHeight  > window.innerHeight ? POSITION.top : POSITION.bottom;
+	      const styles = {
+	        width: $control.outerWidth(),
+	        left: offset.left
+	      };
+	
+	      if (position === POSITION.top) {
+	        Object.assign(styles, {bottom: offset.top, top: 'unset', margin: '0 0 5px 0'});
+	        this.$dropdown.addClass('selectize-position-top');
+	      } else {
+	        Object.assign(styles, {top: offset.top, bottom: 'unset', margin: '5px 0 0 0'});
+	        this.$dropdown.removeClass('selectize-position-top');
+	      }
+	
+	      this.$dropdown.css(styles);
+	    }
+	  }());
+	});
+	
+	
+	Selectize.define('auto_select_on_type', function(options) {
+		var self = this;
+	
+		self.onBlur = (function() {
+			var originalBlur = self.onBlur;
+			return function(e) {
+				var $matchedItem = self.getFirstItemMatchedByTextContent(self.lastValue, true);
+				if (typeof $matchedItem.attr('data-value') !== 'undefined' && self.getValue() !== $matchedItem.attr('data-value'))
+				{
+					self.setValue($matchedItem.attr('data-value'));
+				}
+				return originalBlur.apply(this, arguments);
+			}
+		}());
+	});
+	
+	
+	Selectize.define("autofill_disable", function (options) {
+	  var self = this;
+	
+	  self.setup = (function () {
+	    var original = self.setup;
+	    return function () {
+	      original.apply(self, arguments);
+	
+	      // https://stackoverflow.com/questions/30053167/autocomplete-off-vs-false
+	      self.$control_input.attr({ autocomplete: "new-password", autofill: "no" });
+	    };
+	  })();
+	});
 	
 	
 	Selectize.define('drag_drop', function(options) {
@@ -2968,23 +3173,29 @@
 					disabled: self.isLocked,
 					start: function(e, ui) {
 						ui.placeholder.css('width', ui.helper.css('width'));
-						$control.css({overflow: 'visible'});
+						// $control.css({overflow: 'visible'});
+						$control.addClass('dragging');
 					},
 					stop: function() {
-						$control.css({overflow: 'hidden'});
+						// $control.css({overflow: 'hidden'});
+						$control.removeClass('dragging');
 						var active = self.$activeItems ? self.$activeItems.slice() : null;
 						var values = [];
 						$control.children('[data-value]').each(function() {
 							values.push($(this).attr('data-value'));
 						});
+						self.isFocused = false;
 						self.setValue(values);
+						self.isFocused = true;
 						self.setActiveItem(active);
+						self.positionDropdown();
 					}
 				});
 			};
 		})();
 	
 	});
+	
 	
 	Selectize.define('dropdown_header', function(options) {
 		var self = this;
@@ -3207,6 +3418,7 @@
 							if (self.deleteSelection()) {
 								self.setCaret(self.items.length);
 							}
+							return false;
 						});
 	
 					};
@@ -3248,6 +3460,92 @@
 				return original.apply(this, arguments);
 			};
 		})();
+	});
+	
+	
+	Selectize.define('select_on_focus', function(options) {
+		var self = this;
+	
+		self.on('focus', function() {
+			var originalFocus = self.onFocus;
+			return function(e) {
+				var value = self.getItem(self.getValue()).text();
+				self.clear();
+				self.setTextboxValue(value);
+				self.$control_input.select();
+				setTimeout( function () {
+					if (self.settings.selectOnTab) {
+						self.setActiveOption(self.getFirstItemMatchedByTextContent(value));
+					}
+					self.settings.score = null;
+				},0);
+				return originalFocus.apply(this, arguments);
+			};
+		}());
+	
+		self.onBlur = (function() {
+			var originalBlur = self.onBlur;
+			return function(e) {
+				if (self.getValue() === "" && self.lastValidValue !== self.getValue()) {
+					self.setValue(self.lastValidValue);
+				}
+				setTimeout( function () {
+					self.settings.score = function() {
+						return function() {
+							return 1;
+						};
+					};
+				}, 0 );
+				return originalBlur.apply(this, arguments);
+			}
+		}());
+		self.settings.score = function() {
+			return function() { return 1; };
+		};
+	
+	});
+	
+	
+	Selectize.define('tag_limit', function (options) {
+	    const self = this
+	    options.tagLimit = options.tagLimit
+	    this.onBlur = (function (e) {
+	        const original = self.onBlur
+	
+	        return function (e) {
+	            original.apply(this, e);
+	            if (!e)
+	                return
+	            const $control = this.$control
+	            const $items = $control.find('.item')
+	            const limit = options.tagLimit
+	            if (limit === undefined || $items.length <= limit)
+	                return
+	
+	            $items.toArray().forEach(function(item, index) {
+	                if (index < limit)
+	                    return
+	                $(item).hide()
+	            });
+	
+	            $control.append('<span><b>' + ($items.length - limit) + '</b></span>')
+	        };
+	    })()
+	
+	    this.onFocus = (function (e) {
+	        const original = self.onFocus
+	
+	        return function (e) {
+	            original.apply(this, e);
+	            if (!e)
+	                return
+	            const $control = this.$control
+	            const $items = $control.find('.item')
+	            $items.show()
+	            $control.find('span').remove()
+	
+	        };
+	    })()
 	});
 	
 
