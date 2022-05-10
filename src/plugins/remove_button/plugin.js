@@ -70,6 +70,7 @@ Selectize.define('remove_button', function(options) {
 				if (self.deleteSelection(e)) {
 					self.setCaret(self.items.length);
 				}
+                return false;
 			});
 
 		};

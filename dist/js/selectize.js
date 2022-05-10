@@ -1,5 +1,5 @@
 /**
- * selectize.js (v0.13.5)
+ * selectize.js (v1.0.1)
  * Copyright (c) 2013–2015 Brian Reavis & contributors
  * Copyright (c) 2020 Selectize Team & contributors
  *
@@ -120,7 +120,15 @@
 		}
 	};
 	
-	var IS_MAC        = /Mac/.test(navigator.userAgent);
+	function uaDetect(platform, re) {
+	  if (navigator.userAgentData) {
+	    return platform === navigator.userAgentData.platform;
+	  }
+	
+	  return re.test(navigator.userAgent);
+	}
+	
+	var IS_MAC        = uaDetect("macOS", /Mac/);
 	
 	var KEY_A         = 65;
 	var KEY_COMMA     = 188;
@@ -143,7 +151,7 @@
 	var TAG_INPUT     = 2;
 	
 	// for now, android support in general is too spotty to support validity
-	var SUPPORTS_VALIDITY_API = !/android/i.test(window.navigator.userAgent) && !!document.createElement('input').validity;
+	var SUPPORTS_VALIDITY_API = !uaDetect("Android", /android/i) && !!document.createElement('input').validity;
 	
 	
 	var isset = function(object) {
@@ -3378,7 +3386,7 @@
 					if (self.deleteSelection(e)) {
 						self.setCaret(self.items.length);
 					}
-          return false;
+	                return false;
 				});
 	
 			};
