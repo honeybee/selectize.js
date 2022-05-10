@@ -25,8 +25,9 @@ else
 	git add .
 	git commit -a -m "Released $(version)."
 	git tag v$(version)
-	git push origin master
-	git push origin --tags
-	npm publish --access public
-	@echo "\033[32mv${version} released\033[0;39m"
+#	git push origin master
+#	git push origin --tags
+#	npm publish --access public
+#	@echo "\033[32mv${version} released\033[0;39m"
+	@echo "\033[32mv${version} ready. Push it to the remote repository\033[0;39m"
 endif
